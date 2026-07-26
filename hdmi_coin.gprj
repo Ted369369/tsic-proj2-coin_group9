@@ -12,6 +12,7 @@
         <File path="src/common/lfsr32.v" type="file.verilog" enable="1"/>
         <File path="src/common/reset_sync.v" type="file.verilog" enable="1"/>
         <File path="src/common/rom.v" type="file.verilog" enable="1"/>
+        <File path="src/common/sfx.v" type="file.verilog" enable="1"/>
         <File path="src/game/game_core.v" type="file.verilog" enable="1"/>
         <File path="src/game/game_ctrl.v" type="file.verilog" enable="1"/>
         <File path="src/game/skill_slot.v" type="file.verilog" enable="1"/>

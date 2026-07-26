@@ -3,19 +3,31 @@ param(
     [string]$OutputDir = "src\assets",
     # basenames stored as RGB323 (8-bit) instead of RGB565 (16-bit)
     [string[]]$Sprites8bit = @("player_right_32", "player_skill_32"),
-    # Object sprites, in gameplay type order 0..6, packed (RGB323) into one atlas
+    # Object sprites, in gameplay type order 0..7, packed (RGB323) into one atlas
     # ROM instead of one .mem each. Written to $ObjAtlasFile; not emitted singly.
-    [string[]]$ObjAtlas = @("obj_plus1_16", "obj_plus3_16", "obj_plus5_16", "obj_minus3_16", "obj_minus5_16", "obj_time_16", "obj_charge_16"),
+    [string[]]$ObjAtlas = @("obj_plus1_16", "obj_plus3_16", "obj_plus5_16", "obj_minus3_16", "obj_minus5_16", "obj_time_16", "obj_charge_16", "obj_minustime_16"),
     [string]$ObjAtlasFile = "obj_atlas.mem",
+    # Stage backgrounds, in stage order 1..3, packed (RGB565) into one ROM as
+    # fixed-size slots so bg_layer can address them as {stage, offset}. Each is
+    # stretched to $BgSlotW x $BgSlotH and zero-padded up to $BgSlotDepth.
+    [string[]]$BgSlots = @("background", "background2", "background3"),
+    [string]$BgSlotFile = "background.mem",
+    [int]$BgSlotW = 40,
+    [int]$BgSlotH = 25,
+    [int]$BgSlotDepth = 1024,
     # Target sprite box size (N x N) is taken from the trailing "_<N>" in the
     # base name (e.g. obj_plus1_16 -> 16, player_right_32 -> 32); any-size source
     # art is scaled to fit (aspect-preserved, transparent pad). This map is an
     # override for bases that have no size suffix.
     [hashtable]$FitSize = @{ },
     # Big-image mode: bases here are STRETCHED to exactly W x H (aspect ratio NOT
-    # preserved, no transparent pad). Used for the full-screen background tile.
-    [hashtable]$StretchSize = @{ "background" = @(80, 50) }
+    # preserved, no transparent pad). Used for the full-screen background tiles.
+    [hashtable]$StretchSize = @{ }
 )
+
+# Every background slot is stretched to the slot size; register them up front so
+# Load-Sprite treats them as big images rather than N x N sprite boxes.
+foreach ($bgBase in $BgSlots) { $StretchSize[$bgBase] = @($BgSlotW, $BgSlotH) }
 
 Add-Type -AssemblyName System.Drawing
 
@@ -66,8 +78,53 @@ function Fit-Bitmap {
 }
 
 # Stretch a bitmap to exactly W x H, ignoring aspect ratio (accepts distortion).
+# Shrinking by a large factor (a photo down to the 40x25 background slot) is done
+# by averaging every source pixel that lands in a destination cell -- bicubic
+# samples too few points at that ratio and the result sparkles with aliasing.
 function Stretch-Bitmap {
     param($src, [int]$w, [int]$h)
+
+    if ($src.Width -ge $w * 2 -and $src.Height -ge $h * 2) {
+        $sw = $src.Width
+        $sh = $src.Height
+        $dst = New-Object System.Drawing.Bitmap($w, $h, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+
+        $rect = New-Object System.Drawing.Rectangle(0, 0, $sw, $sh)
+        $data = $src.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::ReadOnly,
+                              [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+        $stride = $data.Stride
+        $bytes = New-Object byte[] ($stride * $sh)
+        [System.Runtime.InteropServices.Marshal]::Copy($data.Scan0, $bytes, 0, $bytes.Length)
+        $src.UnlockBits($data)
+
+        for ($y = 0; $y -lt $h; $y++) {
+            $y0 = [int]([Math]::Floor($y * $sh / $h))
+            $y1 = [int]([Math]::Floor(($y + 1) * $sh / $h))
+            if ($y1 -le $y0) { $y1 = $y0 + 1 }
+
+            for ($x = 0; $x -lt $w; $x++) {
+                $x0 = [int]([Math]::Floor($x * $sw / $w))
+                $x1 = [int]([Math]::Floor(($x + 1) * $sw / $w))
+                if ($x1 -le $x0) { $x1 = $x0 + 1 }
+
+                $sr = 0.0; $sg = 0.0; $sb = 0.0; $n = 0
+                for ($yy = $y0; $yy -lt $y1; $yy++) {
+                    $row = $yy * $stride
+                    for ($xx = $x0; $xx -lt $x1; $xx++) {
+                        $i = $row + $xx * 4
+                        $sb += $bytes[$i]
+                        $sg += $bytes[$i + 1]
+                        $sr += $bytes[$i + 2]
+                        $n++
+                    }
+                }
+                $dst.SetPixel($x, $y, [System.Drawing.Color]::FromArgb(255,
+                    [int]($sr / $n), [int]($sg / $n), [int]($sb / $n)))
+            }
+        }
+        return $dst
+    }
+
     $dst = New-Object System.Drawing.Bitmap($w, $h, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
     $g = [System.Drawing.Graphics]::FromImage($dst)
     $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
@@ -160,6 +217,7 @@ $convertedCount = 0
 foreach ($png in $singles) {
     $base = $png.BaseName
     if ($ObjAtlas -contains $base) { continue }   # packed into the atlas below, not emitted singly
+    if ($BgSlots -contains $base) { continue }    # packed into the background ROM below
     $use8bit = $Sprites8bit -contains $base
     if ($use8bit) { $fmt = "RGB323" } else { $fmt = "RGB565" }
     $memPath = Join-Path $OutputPath ($base + ".mem")
@@ -215,6 +273,32 @@ if ($ObjAtlas.Count -gt 0) {
     }
     $convertedCount++
     Write-Host "$($ObjAtlas -join ',') -> $ObjAtlasFile ($($ObjAtlas.Count) sprites, RGB323 atlas)"
+}
+
+# Stage backgrounds: concatenate each stage image (RGB565) into one .mem as
+# fixed-size slots, so bg_layer reads them from one ROM addressed by
+# {stage, src_y*W + src_x}. Each slot is padded to $BgSlotDepth entries.
+if ($BgSlots.Count -gt 0) {
+    $bgPath = Join-Path $OutputPath $BgSlotFile
+    $used = $BgSlotW * $BgSlotH
+    if ($used -gt $BgSlotDepth) {
+        throw "Background slot $BgSlotW x $BgSlotH ($used) exceeds slot depth $BgSlotDepth"
+    }
+    $writer = [System.IO.StreamWriter]::new($bgPath, $false, [System.Text.Encoding]::ASCII)
+    try {
+        foreach ($base in $BgSlots) {
+            $png = $singles | Where-Object { $_.BaseName -eq $base } | Select-Object -First 1
+            if (-not $png) { throw "Background slot PNG not found in ${InputPath}: $base.png" }
+            $bmp = Load-Sprite $png.FullName $base
+            try { Write-Pixels $bmp $writer $false } finally { $bmp.Dispose() }
+            for ($pad = $used; $pad -lt $BgSlotDepth; $pad++) { $writer.WriteLine("0000") }
+        }
+    }
+    finally {
+        $writer.Dispose()
+    }
+    $convertedCount++
+    Write-Host "$($BgSlots -join ',') -> $BgSlotFile ($($BgSlots.Count) slots, ${BgSlotW}x${BgSlotH} RGB565, slot depth $BgSlotDepth)"
 }
 
 Write-Host "Converted $convertedCount item(s)."

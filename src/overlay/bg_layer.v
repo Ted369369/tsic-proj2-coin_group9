@@ -3,13 +3,16 @@
 
 module bg_layer #(
 	`SVO_DEFAULT_PARAMS,
-	parameter BG_IMG_W = 80,
-	parameter BG_IMG_H = 50,
+	parameter BG_IMG_W = 40,
+	parameter BG_IMG_H = 25,
+	parameter BG_SLOT_DEPTH = 1024,              // entries reserved per stage slot
+	parameter BG_STAGE_COUNT = 3,
 	parameter BG_Y0 = 16,                        // top of the image band
 	parameter BG_TILE_FILE = "src/assets/background.mem"
 ) (
 	input clk,
 	input resetn,
+	input [1:0] stage,
 
 	output reg out_axis_tvalid,
 	input out_axis_tready,
@@ -18,9 +21,11 @@ module bg_layer #(
 );
 `SVO_DECLS
 
-localparam BG_DEPTH = 4096;                      // >= BG_IMG_W * BG_IMG_H (4000)
+// One ROM holds every stage background as a fixed-size slot, so a stage switch
+// is just a base-address change -- no extra block RAM per stage.
+localparam BG_DEPTH = BG_SLOT_DEPTH * BG_STAGE_COUNT;
 localparam BG_ADDR_WIDTH = 12;
-localparam BG_Y1 = BG_Y0 + BG_IMG_H * 8;         // band bottom (exclusive) = 16 + 400 = 416
+localparam BG_Y1 = BG_Y0 + BG_IMG_H * 16;        // band bottom (exclusive) = 16 + 400 = 416
 localparam [23:0] BG_MARGIN_RGB = 24'h181818;    // dark gray outside the band (matches UI)
 
 reg [`SVO_XYBITS-1:0] hcursor, vcursor;
@@ -28,13 +33,14 @@ reg pipe_valid;
 reg pipe_tuser;
 reg pipe_in_band;
 
-// Single 80x50 image shown 8x (pixel replication) in the band Y in [BG_Y0, BG_Y1),
-// X in [0, 640). Address = src_y*80 + src_x (small constant multiply).
+// One 40x25 image per stage shown 16x (pixel replication) in the band
+// Y in [BG_Y0, BG_Y1), X in [0, 640). Address = slot base + src_y*40 + src_x.
 wire in_band = (vcursor >= BG_Y0) && (vcursor < BG_Y1);
-wire [6:0] bg_src_x = hcursor[9:3];              // hcursor / 8 -> 0..79
+wire [5:0] bg_src_x = hcursor[9:4];              // hcursor / 16 -> 0..39
 wire [`SVO_XYBITS-1:0] bg_rel_y = vcursor - BG_Y0;
-wire [5:0] bg_src_y = bg_rel_y[8:3];             // (vcursor - 16) / 8 -> 0..49
-wire [BG_ADDR_WIDTH-1:0] bg_addr = bg_src_y * BG_IMG_W + bg_src_x;
+wire [4:0] bg_src_y = bg_rel_y[8:4];             // (vcursor - 16) / 16 -> 0..24
+wire [BG_ADDR_WIDTH-1:0] bg_slot_base = stage * BG_SLOT_DEPTH;
+wire [BG_ADDR_WIDTH-1:0] bg_addr = bg_slot_base + bg_src_y * BG_IMG_W + bg_src_x;
 wire [15:0] bg_rgb565;
 
 function [23:0] rgb565_to_bgr888;

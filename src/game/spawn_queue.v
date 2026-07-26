@@ -24,6 +24,7 @@ localparam TYPE_MINUS3 = 3;
 localparam TYPE_MINUS5 = 4;
 localparam TYPE_TIME = 5;
 localparam TYPE_CHARGE = 6;
+localparam TYPE_MINUS_TIME = 7;
 
 wire [31:0] pos_rnd;
 wire [31:0] type_rnd;
@@ -37,14 +38,17 @@ wire cand_next = enable && !full;
 wire fifo_wr_en = cand_next && cand_valid;
 wire [10:0] fifo_wr_data = {cand_lane, cand_xoff, cand_type};
 
+// TYPE_MINUS_TIME is generated unconditionally here; spawn_postprocess is what
+// keeps it out of stage 1, so the type mix stays a pure function of the LFSR.
 always @(*) begin
-	     if (cand_pct < 20) cand_type = TYPE_COIN_1;
-	else if (cand_pct < 40) cand_type = TYPE_COIN_3;
-	else if (cand_pct < 50) cand_type = TYPE_COIN_5;
-	else if (cand_pct < 70) cand_type = TYPE_MINUS3;
-	else if (cand_pct < 85) cand_type = TYPE_MINUS5;
-	else if (cand_pct < 90) cand_type = TYPE_TIME;
-	else                    cand_type = TYPE_CHARGE;
+	     if (cand_pct < 18) cand_type = TYPE_COIN_1;
+	else if (cand_pct < 36) cand_type = TYPE_COIN_3;
+	else if (cand_pct < 46) cand_type = TYPE_COIN_5;
+	else if (cand_pct < 64) cand_type = TYPE_MINUS3;
+	else if (cand_pct < 78) cand_type = TYPE_MINUS5;
+	else if (cand_pct < 84) cand_type = TYPE_TIME;
+	else if (cand_pct < 92) cand_type = TYPE_CHARGE;
+	else                    cand_type = TYPE_MINUS_TIME;
 end
 
 lfsr32 #(
