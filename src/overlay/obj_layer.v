@@ -16,7 +16,12 @@ module obj_layer #(
 	// object state from game controller
 	input [9:0] player_x,
 	input       player_dir,
+	input [9:0] player_y,
 	input       skill_on,
+	input       clone_on,
+	input [`FLY_CLONES*10-1:0] fly_x_bus,
+	input [`FLY_CLONES*10-1:0] fly_y_bus,
+	input [`FLY_CLONES-1:0] fly_active,
 
 	input [MAX_OBJ              -1:0] obj_valid_bus,
 	input [MAX_OBJ*LANE_BITS    -1:0] obj_lane_bus,
@@ -59,6 +64,12 @@ wire fire = in_axis_tvalid && in_axis_tready;
 wire [`SVO_XYBITS-1:0] pixel_x = in_axis_tuser[0] ? 0 : hcursor;
 wire [`SVO_XYBITS-1:0] pixel_y = in_axis_tuser[0] ? 0 : vcursor;
 
+// Narrowed copies for the per-pixel hit tests. The cursors only ever reach
+// 639 x 479, so 11 bits is exact -- and every comparator below gets 3 bits
+// cheaper, which matters a lot when they are replicated per object per clone.
+wire [10:0] px = pixel_x[10:0];
+wire [10:0] py = pixel_y[10:0];
+
 integer obj_i;
 reg obj_hit;
 reg [OBJ_TYPE_BITS-1:0] obj_type_now;
@@ -94,10 +105,10 @@ always @(*) begin
 
 		// AABB hit test
 		if (!obj_hit && obj_valid_bus[obj_i] &&
-			pixel_x >= scan_obj_x && pixel_x < scan_obj_x + `OBJ_W &&
-			pixel_y >= scan_obj_ypos && pixel_y < scan_obj_ypos + `OBJ_H) begin
-			scan_local_x = pixel_x - scan_obj_x;
-			scan_local_y = pixel_y - scan_obj_ypos;
+			px >= scan_obj_x && px < scan_obj_x + `OBJ_W &&
+			py >= scan_obj_ypos && py < scan_obj_ypos + `OBJ_H) begin
+			scan_local_x = px - scan_obj_x;
+			scan_local_y = py - scan_obj_ypos;
 			obj_hit = 1;
 			obj_type_now = obj_type_bus[obj_i*OBJ_TYPE_BITS +: OBJ_TYPE_BITS];
 			obj_local_x = scan_local_x[4:0];
@@ -114,12 +125,61 @@ wire [3:0] obj_src_y = obj_local_y[4:1];
 wire [OBJ_ATLAS_ADDR_WIDTH-1:0] obj_atlas_addr = {obj_type_now, obj_src_y, obj_src_x};
 wire [7:0] obj_rgb;
 
-wire hit_player = pixel_x >= player_x && pixel_x < player_x + `PLAYER_W &&
-				  pixel_y >= `PLAYER_Y && pixel_y < `PLAYER_Y + `PLAYER_H;
+// During the clone skill the body is flanked by CLONE_SIDE copies per side,
+// butted edge to edge. Every copy is one PLAYER_W-wide cell of a single span
+// anchored to player_x, so they all track the body for free.
+//
+// The span origin goes negative when the body is near the left edge, so the
+// arithmetic carries a CLONE_BIAS offset and stays unsigned throughout: a pixel
+// left of the span wraps to a large value and simply fails the width test.
+localparam CLONE_BIAS = `PLAYER_W * `CLONE_SIDE;   // >= any clone_pad_px
 
-// 32x32 -> 64x64 scaling by replicating pixels
-wire [9:0] player_rel_x = pixel_x - player_x;
-wire [9:0] player_rel_y = pixel_y - `PLAYER_Y;
+wire [11:0] clone_pad_px = clone_on ? (`PLAYER_W * `CLONE_SIDE) : 12'd0;
+wire [11:0] clone_span_l = player_x + CLONE_BIAS - clone_pad_px;
+wire [11:0] clone_rel_x = pixel_x + CLONE_BIAS - clone_span_l;
+wire [11:0] clone_span_w = clone_on ? `CLONE_SPAN : `PLAYER_W;
+
+wire in_player_band = clone_rel_x < clone_span_w;
+wire in_body = in_player_band &&
+			   py >= player_y && py < player_y + `PLAYER_H;
+
+// Stage 3 escort clones, each at its own free-flying position. Stage 2 clones
+// and stage 3 flyers never overlap in time, so one priority-selected sprite
+// source covers both; the body always wins where they overlap.
+integer gi;
+reg in_fly;
+reg [9:0] fly_rel_x;
+reg [9:0] fly_rel_y;
+reg [9:0] fly_cx;
+reg [9:0] fly_cy;
+
+always @(*) begin
+	in_fly = 0;
+	fly_rel_x = 0;
+	fly_rel_y = 0;
+	fly_cx = 0;
+	fly_cy = 0;
+
+	for (gi = 0; gi < `FLY_CLONES; gi = gi + 1) begin
+		fly_cx = fly_x_bus[gi*10 +: 10];
+		fly_cy = fly_y_bus[gi*10 +: 10];
+
+		if (!in_fly && fly_active[gi] &&
+			px >= fly_cx && px < fly_cx + `PLAYER_W &&
+			py >= fly_cy && py < fly_cy + `PLAYER_H) begin
+			in_fly = 1;
+			fly_rel_x = px - fly_cx;
+			fly_rel_y = py - fly_cy;
+		end
+	end
+end
+
+wire hit_player = in_body || in_fly;
+
+// 32x32 -> 64x64 scaling by replicating pixels; clone_rel_x[5:0] is the offset
+// inside whichever copy this pixel lands in.
+wire [9:0] player_rel_x = in_body ? {4'd0, clone_rel_x[5:0]} : fly_rel_x;
+wire [9:0] player_rel_y = in_body ? (py - player_y) : fly_rel_y;
 wire [PLAYER_SRC_BITS-1:0] player_src_x = player_rel_x[5:1];
 wire [PLAYER_SRC_BITS-1:0] player_src_y = player_rel_y[5:1];
 wire [PLAYER_SRC_BITS-1:0] player_addr_x = player_dir ? player_src_x : (5'd31 - player_src_x);

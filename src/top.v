@@ -6,6 +6,8 @@ module top (
 	input btn_start,
 	input btn_skill,
 
+	output snd,
+
 	output tmds_clk_n,
 	output tmds_clk_p,
 	output [2:0] tmds_d_n,
@@ -112,6 +114,8 @@ game_core #(
 	.btn_right(btn_right_deb),
 	.btn_start(btn_start_deb),
 	.btn_skill(btn_skill_deb),
+
+	.snd(snd),
 
 	.out_axis_tvalid(game_tvalid),
 	.out_axis_tready(game_tready),

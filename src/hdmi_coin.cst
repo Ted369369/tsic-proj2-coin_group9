@@ -23,3 +23,8 @@ IO_PORT "btn_right" PULL_MODE=UP BANK_VCCIO=1.8;
 
 IO_LOC "btn_skill" 18;
 IO_PORT "btn_skill" PULL_MODE=UP BANK_VCCIO=1.8;
+
+// Square-wave sound out. Bank 3 is 1.8V, so drive a passive buzzer through a
+// transistor/amp rather than straight off the pin if you want real volume.
+IO_LOC "snd" 16;
+IO_PORT "snd" PULL_MODE=NONE BANK_VCCIO=1.8;

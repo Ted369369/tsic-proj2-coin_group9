@@ -1,5 +1,6 @@
 `timescale 1ns / 1ps
 `include "hdmi/svo_defines.vh"
+`include "game/game_defs.vh"
 
 module game_core #(
 	parameter SVO_MODE             =   "640x480V",
@@ -20,12 +21,14 @@ module game_core #(
 	input btn_start,
 	input btn_skill,
 
+	output snd,
+
 	output out_axis_tvalid,
 	input out_axis_tready,
 	output [SVO_BITS_PER_PIXEL-1:0] out_axis_tdata,
 	output [0:0] out_axis_tuser
 );
-localparam MAX_OBJ = 8;
+localparam MAX_OBJ = 7;
 localparam LANE_BITS = 4;
 localparam XOFF_BITS = 4;
 localparam OBJ_TYPE_BITS = 3;
@@ -49,6 +52,7 @@ wire [0:0] ui_tuser;
 wire frame_tick;
 wire [9:0] player_x;
 wire player_dir;
+wire [9:0] player_y;
 wire [MAX_OBJ              -1:0] obj_valid_bus;
 wire [MAX_OBJ*LANE_BITS    -1:0] obj_lane_bus;
 wire [MAX_OBJ*XOFF_BITS    -1:0] obj_xoff_bus;
@@ -62,6 +66,12 @@ wire [11:0] high_score_bcd;
 wire [2:0] skill_charge;
 wire [7:0] skill_timer;
 wire skill_on;
+wire [1:0] stage;
+wire clone_on;
+wire [`FLY_CLONES*10-1:0] fly_x_bus;
+wire [`FLY_CLONES*10-1:0] fly_y_bus;
+wire [`FLY_CLONES-1:0] fly_active;
+wire [2:0] sfx_id;
 wire game_over;
 
 // Frame start signal
@@ -87,6 +97,7 @@ game_ctrl #(
 
 	.player_x(player_x),
 	.player_dir(player_dir),
+	.player_y(player_y),
 
 	.obj_valid_bus(obj_valid_bus),
 	.obj_lane_bus(obj_lane_bus),
@@ -102,7 +113,21 @@ game_ctrl #(
 	.skill_charge(skill_charge),
 	.skill_timer(skill_timer),
 	.skill_on(skill_on),
+	.stage(stage),
+	.clone_on(clone_on),
+	.fly_x_bus(fly_x_bus),
+	.fly_y_bus(fly_y_bus),
+	.fly_active(fly_active),
+	.sfx_id(sfx_id),
 	.game_over(game_over)
+);
+
+sfx u_sfx (
+	.clk(clk),
+	.resetn(resetn),
+	.frame_tick(frame_tick),
+	.sfx_id(sfx_id),
+	.snd(snd)
 );
 
 bg_layer #(
@@ -111,6 +136,7 @@ bg_layer #(
 ) u_bg_layer (
 	.clk(clk),
 	.resetn(resetn),
+	.stage(stage),
 
 	.out_axis_tvalid(bg_tvalid),
 	.out_axis_tready(bg_tready),
@@ -131,7 +157,12 @@ obj_layer #(
 
 	.player_x(player_x),
 	.player_dir(player_dir),
+	.player_y(player_y),
 	.skill_on(skill_on),
+	.clone_on(clone_on),
+	.fly_x_bus(fly_x_bus),
+	.fly_y_bus(fly_y_bus),
+	.fly_active(fly_active),
 	.obj_valid_bus(obj_valid_bus),
 	.obj_lane_bus(obj_lane_bus),
 	.obj_xoff_bus(obj_xoff_bus),
