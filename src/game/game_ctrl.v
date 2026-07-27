@@ -41,7 +41,6 @@ module game_ctrl #(
 	output reg [MAX_OBJ*OBJ_TYPE_BITS-1:0] obj_type_bus,
 
 	output reg [7:0] timer,
-	output reg [11:0] score,
 	output [11:0] timer_bcd,
 	output [15:0] score_bcd,
 	output reg [15:0] high_score_bcd,
@@ -68,7 +67,8 @@ localparam TYPE_TIME = 5;
 localparam TYPE_CHARGE = 6;
 localparam TYPE_MINUS_TIME = 7;
 
-localparam SCORE_MAX = 4095;      // fits four BCD digits, and is the 12-bit max
+
+localparam SCORE_HALF_MAX = 99;   // each half holds two digits -> 9999 total
 localparam FALL_SPEED_BOOST = 4;
 localparam TIME_SKILL_BONUS = 10;
 localparam SPAWN_JITTER_BITS = 4;
@@ -103,6 +103,10 @@ reg [7:0] frame_cnt;
 reg [7:0] spawn_cnt;
 reg btn_start_q;
 reg btn_skill_q;
+
+// Score split into two 0..99 halves: thousands+hundreds, tens+units.
+reg [6:0] score_hi;
+reg [6:0] score_lo;
 reg signed [10:0] player_vy;
 reg [1:0] jump_count;
 reg [1:0] crazy_state;
@@ -169,7 +173,7 @@ wire signed [7:0] crazy_new_vy =
 
 // Field pressure ramps per stage: more objects allowed on screen at once, a
 // tighter spawn interval, and a faster fall.
-wire [4:0] obj_cap = (stage == 0) ? 5'd3 : (stage == 1) ? 5'd5 : 5'd7;
+wire [4:0] obj_cap = (stage == 0) ? 5'd3 : (stage == 1) ? 5'd4 : 5'd6;
 wire [7:0] spawn_period_base = (stage == 0) ? 8'd24 : (stage == 1) ? 8'd14 : 8'd8;
 wire [9:0] fall_base = FALL_SPEED + {8'd0, stage};
 wire [9:0] fall_speed_eff = skill_on ? fall_base + 10'd2 : fall_base;
@@ -314,20 +318,23 @@ wire clone_catch = ground_valid && !hit_valid && ground_clone_hit && !crazy_acti
 wire catch_valid = hit_valid || clone_catch;
 wire [4:0] catch_idx = hit_valid ? hit_idx : 5'd0;
 
-reg [11:0] next_score;
+reg [6:0] next_hi;
+reg [6:0] next_lo;
 reg [7:0] next_timer;
 reg [2:0] next_charge;
 reg signed [5:0] score_delta;
 reg signed [6:0] score_delta_eff;
-reg signed [13:0] score_sum;
-wire [11:0] final_score = catch_valid ? next_score : score;
+reg signed [8:0] lo_sum;
+wire [6:0] final_hi = catch_valid ? next_hi : score_hi;
+wire [6:0] final_lo = catch_valid ? next_lo : score_lo;
 always @(*) begin
-	next_score = score;
+	next_hi = score_hi;
+	next_lo = score_lo;
 	next_timer = timer;
 	next_charge = skill_charge;
 	score_delta = 0;
 	score_delta_eff = 0;
-	score_sum = score;
+	lo_sum = $signed({2'b0, score_lo});
 
 	if (catch_valid) begin
 		case (obj_type[catch_idx])
@@ -349,15 +356,33 @@ always @(*) begin
 		endcase
 
 		score_delta_eff = score_delta;
-		score_sum = $signed({2'b0, score}) + score_delta_eff;
-		// Clamp to what four BCD digits can show, so the display can never
-		// roll over the way the old 3-digit score did past 999.
-		if (score_sum < 0)
-			next_score = 0;
-		else if (score_sum > SCORE_MAX)
-			next_score = SCORE_MAX;
-		else
-			next_score = score_sum[11:0];
+
+		// The score is kept as two 0..99 halves rather than one binary number,
+		// so each half needs only a tiny 7-bit -> 2-digit converter. Carrying
+		// between them is done here in decimal.
+		lo_sum = $signed({2'b0, score_lo}) + score_delta_eff;
+
+		if (lo_sum < 0) begin
+			// Borrow from the upper half, or stop at zero.
+			if (score_hi == 0) begin
+				next_hi = 7'd0;
+				next_lo = 7'd0;
+			end else begin
+				next_hi = score_hi - 1'b1;
+				next_lo = lo_sum + 9'sd100;
+			end
+		end else if (lo_sum >= 9'sd100) begin
+			// Carry into the upper half, or saturate at 9999.
+			if (score_hi >= SCORE_HALF_MAX) begin
+				next_hi = SCORE_HALF_MAX;
+				next_lo = SCORE_HALF_MAX;
+			end else begin
+				next_hi = score_hi + 1'b1;
+				next_lo = lo_sum - 9'sd100;
+			end
+		end else begin
+			next_lo = lo_sum[6:0];
+		end
 	end
 end
 
@@ -389,13 +414,31 @@ wire new_high_score = score_bcd > high_score_bcd;
 
 wire high_score_will_update = game_ending && new_high_score;
 
+// Two 2-digit converters instead of one 4-digit one. Each half only spans
+// 0..99, so each converter is 7 bits wide -- together they are cheaper than a
+// single 12-bit/4-digit unit, and they reach 9999 instead of 4095.
+wire [7:0] score_hi_bcd;
+wire [7:0] score_lo_bcd;
+
 bin2bcd #(
-	.BIN_BITS(12),
-	.BCD_DIGITS(4)
-) u_score_bcd (
-	.bin(final_score),
-	.bcd(score_bcd)
+	.BIN_BITS(7),
+	.BCD_DIGITS(2)
+) u_score_hi_bcd (
+	.bin(final_hi),
+	.bcd(score_hi_bcd)
 );
+
+bin2bcd #(
+	.BIN_BITS(7),
+	.BCD_DIGITS(2)
+) u_score_lo_bcd (
+	.bin(final_lo),
+	.bcd(score_lo_bcd)
+);
+
+// {thousands, hundreds, tens, units} -- exactly the packed layout the UI and
+// the result overlay already read, so neither of them changes.
+assign score_bcd = {score_hi_bcd, score_lo_bcd};
 
 bin2bcd #(
 	.BIN_BITS(8)
@@ -458,7 +501,8 @@ always @(posedge clk) begin
 		stage <= 0;
 		obj_count <= 0;
 		timer <= TIMER_START;
-		score <= 0;
+		score_hi <= 0;
+		score_lo <= 0;
 		high_score_bcd <= 16'h0000;
 		skill_charge <= 0;
 		state <= S_PLAY;
@@ -498,7 +542,8 @@ always @(posedge clk) begin
 			stage <= 0;
 			obj_count <= 0;
 			timer <= TIMER_START;
-			score <= 0;
+			score_hi <= 0;
+			score_lo <= 0;
 			skill_charge <= 0;
 			state <= S_PLAY;
 			frame_cnt <= 0;
@@ -660,7 +705,8 @@ always @(posedge clk) begin
 
 				// Hit effect update (body catch or ground runner catch)
 				if (catch_valid) begin
-					score <= next_score;
+					score_hi <= next_hi;
+					score_lo <= next_lo;
 					timer <= next_timer;
 					skill_charge <= next_charge;
 				end

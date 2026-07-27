@@ -28,7 +28,7 @@ module game_core #(
 	output [SVO_BITS_PER_PIXEL-1:0] out_axis_tdata,
 	output [0:0] out_axis_tuser
 );
-localparam MAX_OBJ = 7;
+localparam MAX_OBJ = 6;
 localparam LANE_BITS = 4;
 localparam XOFF_BITS = 4;
 localparam OBJ_TYPE_BITS = 3;
@@ -59,7 +59,6 @@ wire [MAX_OBJ*XOFF_BITS    -1:0] obj_xoff_bus;
 wire [MAX_OBJ*OBJ_Y_BITS   -1:0] obj_ypos_bus;
 wire [MAX_OBJ*OBJ_TYPE_BITS-1:0] obj_type_bus;
 wire [7:0] timer;
-wire [11:0] score;
 wire [11:0] timer_bcd;
 wire [15:0] score_bcd;
 wire [15:0] high_score_bcd;
@@ -106,7 +105,6 @@ game_ctrl #(
 	.obj_type_bus(obj_type_bus),
 
 	.timer(timer),
-	.score(score),
 	.timer_bcd(timer_bcd),
 	.score_bcd(score_bcd),
 	.high_score_bcd(high_score_bcd),
