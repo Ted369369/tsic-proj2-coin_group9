@@ -1,5 +1,6 @@
 `timescale 1ns / 1ps
 `include "hdmi/svo_defines.vh"
+`include "game/game_defs.vh"
 
 module ui_layer #(
 	`SVO_DEFAULT_PARAMS,
@@ -41,11 +42,13 @@ localparam DIGIT_GAP = 6;
 localparam TIMER_X = 32;
 localparam SCORE_X = 263;
 localparam HIGH_SCORE_X = 494;
-localparam CHARGE_X = 220;
 localparam CHARGE_Y = 474;
 localparam CHARGE_W = 36;
 localparam CHARGE_H = 6;
 localparam CHARGE_GAP = 4;
+// Derived so the meter stays centred if the charge count ever changes again.
+localparam CHARGE_SPAN = `SKILL_CHARGE_MAX * (CHARGE_W + CHARGE_GAP) - CHARGE_GAP;
+localparam CHARGE_X = (640 - CHARGE_SPAN) / 2;
 localparam SKILL_TIME_X = 430;
 localparam SKILL_TIME_Y = 452;
 localparam SMALL_DIGIT_W = 12;
@@ -139,7 +142,7 @@ function charge_bar_pixel;
 		charge_bar_pixel = 0;
 
 		if (y >= CHARGE_Y && y < CHARGE_Y + CHARGE_H) begin
-			for (j = 0; j < 5; j = j + 1) begin
+			for (j = 0; j < `SKILL_CHARGE_MAX; j = j + 1) begin
 				bar_x = CHARGE_X + j * (CHARGE_W + CHARGE_GAP);
 
 				if (charge > j &&

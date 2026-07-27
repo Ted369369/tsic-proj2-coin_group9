@@ -8,4 +8,6 @@
 `define PLAY_TOP 10'd16
 `define CLONE_SIDE 1
 `define FLY_CLONES 5
+// Shared so game_ctrl's threshold and ui_layer's meter can never disagree.
+`define SKILL_CHARGE_MAX 3
 `define CLONE_SPAN (`PLAYER_W * (2 * `CLONE_SIDE + 1))
