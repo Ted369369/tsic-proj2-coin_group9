@@ -15,7 +15,7 @@ module game_ctrl #(
 	parameter TIMER_START = 30,
 	parameter TIME_BONUS = 3,
 	parameter FPS = 60,
-	parameter SKILL_CHARGE_MAX = 5,
+	parameter SKILL_CHARGE_MAX = `SKILL_CHARGE_MAX,
 	parameter SKILL_ENABLE = 0,
 	parameter SKILL_DURATION = 0,
 	parameter TIME_PENALTY = 3,
@@ -632,7 +632,8 @@ always @(posedge clk) begin
 						crazy_vx <= crazy_new_vx;
 						crazy_vy <= crazy_new_vy;
 
-						// Clones burst out of the body, then scatter on their own
+						// Clones burst out of the body, then scatter on their own.
+						// These are solid bodies, not afterimages.
 						fly_active <= {`FLY_CLONES{1'b1}};
 						for (fi = 0; fi < `FLY_CLONES; fi = fi + 1) begin
 							fly_x[fi] <= player_x;
