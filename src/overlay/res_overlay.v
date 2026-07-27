@@ -8,8 +8,8 @@ module res_overlay #(
 	input resetn,
 
 	input show,
-	input [11:0] score_bcd,
-	input [11:0] high_score_bcd,
+	input [15:0] score_bcd,
+	input [15:0] high_score_bcd,
 
 	input in_axis_tvalid,
 	output in_axis_tready,
@@ -43,7 +43,9 @@ localparam [9:0] SCORE_LABEL_Y = 10'd228;
 localparam [9:0] BEST_LABEL_X  = 10'd152;
 localparam [9:0] BEST_LABEL_Y  = 10'd300;
 
-localparam [9:0] VALUE_X       = 10'd300;
+// Shifted left by half a glyph pitch so the 4-digit value keeps the same
+// visual centre the 3-digit one had, inside the 128..512 panel.
+localparam [9:0] VALUE_X       = 10'd284;
 localparam [9:0] VAL_STRIDE    = 10'd32;   // (6+2) * 4
 localparam [9:0] VAL_GW        = 10'd24;   // 6 * 4
 localparam [9:0] SCORE_VAL_Y   = 10'd216;
@@ -218,14 +220,15 @@ always @(*) begin
 		end
 	end
 
-	// Score value (3 BCD digits), scale 4
+	// Score value (4 BCD digits), scale 4
 	if (!glyph_hit && pixel_y >= SCORE_VAL_Y && pixel_y < SCORE_VAL_Y + 48) begin
-		gc = glyph_col(pixel_x, VALUE_X, VAL_STRIDE, VAL_GW, 4'd3);
+		gc = glyph_col(pixel_x, VALUE_X, VAL_STRIDE, VAL_GW, 4'd4);
 		if (gc[8]) begin
 			ci = gc[7:5];
 			case (ci)
-				3'd0: glyph = {1'b0, score_bcd[11:8]};
-				3'd1: glyph = {1'b0, score_bcd[7:4]};
+				3'd0: glyph = {1'b0, score_bcd[15:12]};
+				3'd1: glyph = {1'b0, score_bcd[11:8]};
+				3'd2: glyph = {1'b0, score_bcd[7:4]};
 				default: glyph = {1'b0, score_bcd[3:0]};
 			endcase
 			glyph_hit = 1'b1;
@@ -234,14 +237,15 @@ always @(*) begin
 		end
 	end
 
-	// Best value (3 BCD digits), scale 4
+	// Best value (4 BCD digits), scale 4
 	if (!glyph_hit && pixel_y >= BEST_VAL_Y && pixel_y < BEST_VAL_Y + 48) begin
-		gc = glyph_col(pixel_x, VALUE_X, VAL_STRIDE, VAL_GW, 4'd3);
+		gc = glyph_col(pixel_x, VALUE_X, VAL_STRIDE, VAL_GW, 4'd4);
 		if (gc[8]) begin
 			ci = gc[7:5];
 			case (ci)
-				3'd0: glyph = {1'b0, high_score_bcd[11:8]};
-				3'd1: glyph = {1'b0, high_score_bcd[7:4]};
+				3'd0: glyph = {1'b0, high_score_bcd[15:12]};
+				3'd1: glyph = {1'b0, high_score_bcd[11:8]};
+				3'd2: glyph = {1'b0, high_score_bcd[7:4]};
 				default: glyph = {1'b0, high_score_bcd[3:0]};
 			endcase
 			glyph_hit = 1'b1;

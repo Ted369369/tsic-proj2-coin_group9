@@ -10,8 +10,8 @@ module ui_layer #(
 	input resetn,
 
 	input [11:0] timer_bcd,
-	input [11:0] score_bcd,
-	input [11:0] high_score_bcd,
+	input [15:0] score_bcd,
+	input [15:0] high_score_bcd,
 	input [2:0] skill_charge,
 	input [7:0] skill_timer,
 	input game_over,
@@ -79,10 +79,12 @@ wire [3:0] timer_d2 = timer_bcd[11:8];
 wire [3:0] timer_d1 = timer_bcd[7:4];
 wire [3:0] timer_d0 = timer_bcd[3:0];
 
+wire [3:0] score_d3 = score_bcd[15:12];
 wire [3:0] score_d2 = score_bcd[11:8];
 wire [3:0] score_d1 = score_bcd[7:4];
 wire [3:0] score_d0 = score_bcd[3:0];
 
+wire [3:0] high_score_d3 = high_score_bcd[15:12];
 wire [3:0] high_score_d2 = high_score_bcd[11:8];
 wire [3:0] high_score_d1 = high_score_bcd[7:4];
 wire [3:0] high_score_d0 = high_score_bcd[3:0];
@@ -92,21 +94,25 @@ wire [3:0] skill_timer_d1 = skill_timer_ge_10 ? 1 : 0;
 wire [3:0] skill_timer_d0 = skill_timer_ge_10 ? skill_timer - 10 : skill_timer[3:0];
 wire skill_small_on = SKILL_ENABLE && (skill_timer != 0);
 
-// For a big-digit field at base X, report which of the 3 columns the current
-// pixel hits: {hit(1), col(2), local_x(5)}.
+// For a big-digit field at base X, report which column the current pixel hits:
+// {hit(1), col(2), local_x(5)}. ndig lets the 3-digit timer and the 4-digit
+// score share one helper.
 function [7:0] big_col;
 	input [`SVO_XYBITS-1:0] px;
 	input [`SVO_XYBITS-1:0] base;
+	input [2:0] ndig;
 	integer i;
 	reg [`SVO_XYBITS-1:0] dleft;
 	reg [4:0] lx;
 	begin
 		big_col = 8'd0;
-		for (i = 0; i < 3; i = i + 1) begin
-			dleft = base + i * (DIGIT_W + DIGIT_GAP);
-			if (px >= dleft && px < dleft + DIGIT_W) begin
-				lx = px - dleft;
-				big_col = {1'b1, i[1:0], lx};
+		for (i = 0; i < 4; i = i + 1) begin
+			if (i < ndig) begin
+				dleft = base + i * (DIGIT_W + DIGIT_GAP);
+				if (px >= dleft && px < dleft + DIGIT_W) begin
+					lx = px - dleft;
+					big_col = {1'b1, i[1:0], lx};
+				end
 			end
 		end
 	end
@@ -177,9 +183,9 @@ always @(*) begin
 	ly_big    = 0;
 	ly_small  = 0;
 
-	tcol = big_col(pixel_x, TIMER_X);
-	scol = big_col(pixel_x, SCORE_X);
-	hcol = big_col(pixel_x, HIGH_SCORE_X);
+	tcol = big_col(pixel_x, TIMER_X, 3'd3);
+	scol = big_col(pixel_x, SCORE_X, 3'd4);
+	hcol = big_col(pixel_x, HIGH_SCORE_X, 3'd4);
 	kcol = small_col(pixel_x, SKILL_TIME_X);
 
 	if (pixel_y >= DIGIT_Y && pixel_y < DIGIT_Y + DIGIT_H) begin
@@ -196,8 +202,9 @@ always @(*) begin
 		end else if (scol[7]) begin
 			glyph_hit = 1'b1; field = 2'd1; lx_sel = scol[4:0];
 			case (scol[6:5])
-				2'd0: digit = score_d2;
-				2'd1: digit = score_d1;
+				2'd0: digit = score_d3;
+				2'd1: digit = score_d2;
+				2'd2: digit = score_d1;
 				default: digit = score_d0;
 			endcase
 			src_x = lx_sel[4:2];
@@ -205,8 +212,9 @@ always @(*) begin
 		end else if (hcol[7]) begin
 			glyph_hit = 1'b1; field = 2'd2; lx_sel = hcol[4:0];
 			case (hcol[6:5])
-				2'd0: digit = high_score_d2;
-				2'd1: digit = high_score_d1;
+				2'd0: digit = high_score_d3;
+				2'd1: digit = high_score_d2;
+				2'd2: digit = high_score_d1;
 				default: digit = high_score_d0;
 			endcase
 			src_x = lx_sel[4:2];

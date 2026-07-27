@@ -41,10 +41,10 @@ module game_ctrl #(
 	output reg [MAX_OBJ*OBJ_TYPE_BITS-1:0] obj_type_bus,
 
 	output reg [7:0] timer,
-	output reg [9:0] score,
+	output reg [11:0] score,
 	output [11:0] timer_bcd,
-	output [11:0] score_bcd,
-	output reg [11:0] high_score_bcd,
+	output [15:0] score_bcd,
+	output reg [15:0] high_score_bcd,
 	output reg [2:0] skill_charge,
 	output [7:0] skill_timer,
 	output skill_on,
@@ -68,6 +68,7 @@ localparam TYPE_TIME = 5;
 localparam TYPE_CHARGE = 6;
 localparam TYPE_MINUS_TIME = 7;
 
+localparam SCORE_MAX = 4095;      // fits four BCD digits, and is the 12-bit max
 localparam FALL_SPEED_BOOST = 4;
 localparam TIME_SKILL_BONUS = 10;
 localparam SPAWN_JITTER_BITS = 4;
@@ -313,13 +314,13 @@ wire clone_catch = ground_valid && !hit_valid && ground_clone_hit && !crazy_acti
 wire catch_valid = hit_valid || clone_catch;
 wire [4:0] catch_idx = hit_valid ? hit_idx : 5'd0;
 
-reg [9:0] next_score;
+reg [11:0] next_score;
 reg [7:0] next_timer;
 reg [2:0] next_charge;
 reg signed [5:0] score_delta;
 reg signed [6:0] score_delta_eff;
-reg signed [10:0] score_sum;
-wire [9:0] final_score = catch_valid ? next_score : score;
+reg signed [13:0] score_sum;
+wire [11:0] final_score = catch_valid ? next_score : score;
 always @(*) begin
 	next_score = score;
 	next_timer = timer;
@@ -348,11 +349,15 @@ always @(*) begin
 		endcase
 
 		score_delta_eff = score_delta;
-		score_sum = $signed({1'b0, score}) + score_delta_eff;
+		score_sum = $signed({2'b0, score}) + score_delta_eff;
+		// Clamp to what four BCD digits can show, so the display can never
+		// roll over the way the old 3-digit score did past 999.
 		if (score_sum < 0)
 			next_score = 0;
+		else if (score_sum > SCORE_MAX)
+			next_score = SCORE_MAX;
 		else
-			next_score = score_sum[9:0];
+			next_score = score_sum[11:0];
 	end
 end
 
@@ -385,7 +390,8 @@ wire new_high_score = score_bcd > high_score_bcd;
 wire high_score_will_update = game_ending && new_high_score;
 
 bin2bcd #(
-	.BIN_BITS(10)
+	.BIN_BITS(12),
+	.BCD_DIGITS(4)
 ) u_score_bcd (
 	.bin(final_score),
 	.bcd(score_bcd)
@@ -453,7 +459,7 @@ always @(posedge clk) begin
 		obj_count <= 0;
 		timer <= TIMER_START;
 		score <= 0;
-		high_score_bcd <= 12'h000;
+		high_score_bcd <= 16'h0000;
 		skill_charge <= 0;
 		state <= S_PLAY;
 		frame_cnt <= 0;
